@@ -8,25 +8,26 @@ import html2canvas from 'html2canvas';
 
 import VacationModal from '../components/VacationModal';
 import AddEmployeeModal from '../components/AddEmployeeModal';
-import LogoEmpresa from '../assets/logoAAFapp.jpg'; 
+import LogoEmpresa from '../assets/logoAAF.jpg'; 
 
 const Dashboard = () => {
   const [employees, setEmployees] = useState([]);
   const [vacations, setVacations] = useState([]);
   const [loading, setLoading] = useState(true);
-  const dashboardRef = useRef(); // Referência para capturar a imagem
+  const dashboardRef = useRef();
   
   const [isVacationModalOpen, setIsVacationModalOpen] = useState(false);
   const [isAddEmpModalOpen, setIsAddEmpModalOpen] = useState(false);
 
+  // Carregar dados da Base de Dados (Supabase)
   const fetchData = async () => {
     try {
       const [empRes, vacRes] = await Promise.all([
         employeeProvider.getAll(),
         vacationProvider.getAll()
       ]);
-      setEmployees(empRes.data);
-      setVacations(vacRes.data);
+      setEmployees(empRes.data || []);
+      setVacations(vacRes.data || []);
     } catch (error) {
       console.error("Erro ao carregar dados:", error);
     } finally {
@@ -38,38 +39,40 @@ const Dashboard = () => {
     fetchData();
   }, []);
 
-  // --- Função para Gerar PDF ---
+  // Exportar para PDF (Captura a área do dashboard)
   const exportToPDF = async () => {
     const element = dashboardRef.current;
-    const canvas = await html2canvas(element, {
-      scale: 2,
-      useCORS: true,
-      logging: false,
-    });
-    
+    const canvas = await html2canvas(element, { scale: 2, useCORS: true });
     const imgData = canvas.toDataURL('image/png');
-    const pdf = new jsPDF('l', 'mm', 'a4'); // 'l' para landscape (horizontal)
-    const imgProps = pdf.getImageProperties(imgData);
-    const pdfWidth = pdf.internal.pageSize.getWidth();
-    const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-    
-    pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+    const pdf = new jsPDF('l', 'mm', 'a4');
+    pdf.addImage(imgData, 'PNG', 0, 0, 297, 210);
     pdf.save(`Mapa_Ferias_AAF_${new Date().getFullYear()}.pdf`);
   };
 
+  // Remover Férias ao clicar no calendário
   const handleEventClick = async (clickInfo) => {
-    const vacationId = parseInt(clickInfo.event.id);
     if (window.confirm(`Deseja cancelar as férias de: ${clickInfo.event.title}?`)) {
-      await vacationProvider.delete(vacationId);
-      fetchData();
+      try {
+        await vacationProvider.delete(parseInt(clickInfo.event.id));
+        fetchData();
+      } catch (error) {
+        alert("Erro ao remover férias.");
+      }
     }
   };
 
-  const handleDeleteEmployee = async (id, name) => {
-    if (window.confirm(`Apagar ${name}?`)) {
-      await employeeProvider.delete(id);
-      fetchData();
-    }
+  // Alertas de Capacidade (Exemplo para os próximos 5 dias com ocupação)
+  const activeAlerts = () => {
+    const alerts = [];
+    const today = new Date().toISOString().split('T')[0];
+    
+    vacations.forEach(v => {
+      if (v.start_date >= today) {
+        const emp = employees.find(e => e.id === v.employee_id);
+        if (emp) alerts.push({ date: v.start_date, role: emp.role, name: emp.name });
+      }
+    });
+    return alerts.sort((a, b) => a.date.localeCompare(b.date)).slice(0, 5);
   };
 
   const calendarEvents = vacations.map(v => ({
@@ -82,78 +85,136 @@ const Dashboard = () => {
     allDay: true
   }));
 
-  if (loading) return <div className="p-10 text-center font-bold">A carregar...</div>;
+  if (loading) return (
+    <div className="h-screen flex items-center justify-center bg-gray-50">
+      <div className="flex flex-col items-center gap-4">
+        <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+        <p className="font-black text-blue-600 uppercase tracking-widest text-sm">A ligar à Nuvem AAF...</p>
+      </div>
+    </div>
+  );
 
   return (
     <div className="flex h-screen bg-gray-100 font-sans overflow-hidden" ref={dashboardRef}>
-      {/* Sidebar Lateral */}
-      <aside className="w-80 bg-white shadow-2xl flex flex-col z-10">
-        <div className="p-8 border-b flex justify-center">
+      {/* Sidebar - Gestão de Equipa */}
+      <aside className="w-85 bg-white shadow-2xl flex flex-col z-10 border-r border-gray-200">
+        <div className="p-8 border-b flex justify-center bg-white">
           <img src={LogoEmpresa} alt="Logo AAF" className="h-16 w-auto object-contain" />
         </div>
         
         <div className="p-6 overflow-y-auto flex-1 custom-scrollbar">
           <div className="flex justify-between items-center mb-6">
-            <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest">Equipa</h3>
+            <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest">Colaborador</h3>
             <button 
               onClick={() => setIsAddEmpModalOpen(true)}
-              className="text-[10px] bg-blue-600 text-white px-3 py-1.5 rounded-lg font-bold hover:bg-blue-700"
+              className="text-[10px] bg-blue-600 text-white px-3 py-1.5 rounded-lg font-bold hover:bg-blue-700 transition-all shadow-md"
             >
               + NOVO
             </button>
           </div>
 
           <div className="space-y-4">
-            {employees.map(emp => (
-              <div key={emp.id} className="p-4 rounded-xl border border-gray-100 bg-gray-50 group relative">
-                <button onClick={() => handleDeleteEmployee(emp.id, emp.name)} className="absolute top-2 right-2 text-[8px] bg-red-100 text-red-600 px-2 py-0.5 rounded opacity-0 group-hover:opacity-100 font-bold transition-opacity">APAGAR</button>
-                <div className="flex items-center gap-3 mb-1">
-                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: emp.color }}></span>
-                  <p className="font-bold text-gray-800 text-sm">{emp.name}</p>
+            {employees.map(emp => {
+              const total = emp.totaldays || 22;
+              const usado = emp.used || 0;
+              const restante = total - usado;
+              const percentagem = Math.min((usado / total) * 100, 100);
+
+              return (
+                <div key={emp.id} className="p-4 rounded-2xl border border-gray-100 bg-gray-50 hover:bg-white hover:shadow-lg transition-all group relative">
+                  <button 
+                    onClick={async () => { if(window.confirm(`Apagar ${emp.name}?`)) { await employeeProvider.delete(emp.id); fetchData(); } }}
+                    className="absolute top-2 right-2 text-[8px] bg-red-50 text-red-500 px-2 py-1 rounded opacity-0 group-hover:opacity-100 font-bold transition-all"
+                  >
+                    REMOVER
+                  </button>
+                  
+                  <div className="flex items-center gap-3 mb-1">
+                    <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: emp.color }}></span>
+                    <p className="font-bold text-gray-800 text-sm tracking-tight">{emp.name}</p>
+                  </div>
+                  <p className="text-[9px] text-blue-600 font-black uppercase ml-5 mb-3 tracking-widest">{emp.role}</p>
+                  
+                  {/* Barra de Progresso */}
+                  <div className="w-[calc(100%-20px)] bg-gray-200 rounded-full h-2 ml-5 overflow-hidden">
+                    <div 
+                      className="h-2 transition-all duration-700 ease-out" 
+                      style={{ width: `${percentagem}%`, backgroundColor: emp.color }}
+                    ></div>
+                  </div>
+
+                  {/* Info de Dias */}
+                  <div className="flex justify-between items-end ml-5 mt-3">
+                    <div className="flex flex-col">
+                      <span className="text-sm font-black text-gray-900 leading-none">{restante}</span>
+                      <span className="text-[7px] text-gray-400 font-bold uppercase tracking-tighter">Dias Restantes</span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-[9px] text-gray-500 font-bold italic">Total: {total}</span>
+                    </div>
+                  </div>
                 </div>
-                <p className="text-[9px] text-blue-600 font-black uppercase ml-5">{emp.role}</p>
-              </div>
-            ))}
+              );
+            })}
+          </div>
+
+          {/* Alertas Rápidos */}
+          <div className="mt-10 pt-6 border-t border-gray-100">
+            <h3 className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-4 flex items-center gap-2">
+               <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span> Próximas Saídas
+            </h3>
+            <div className="space-y-2">
+              {activeAlerts().length > 0 ? activeAlerts().map((alert, idx) => (
+                <div key={idx} className="flex justify-between items-center bg-red-50 p-3 rounded-xl border border-red-100">
+                  <span className="text-[9px] font-bold text-gray-700">{new Date(alert.date).toLocaleDateString('pt-PT')}</span>
+                  <span className="text-[8px] bg-red-600 text-white px-2 py-0.5 rounded font-black uppercase">{alert.role}</span>
+                </div>
+              )) : <p className="text-[10px] text-gray-400 italic">Sem saídas programadas.</p>}
+            </div>
           </div>
         </div>
       </aside>
 
-      {/* Área Principal */}
+      {/* Main - Calendário Operacional */}
       <main className="flex-1 p-8 overflow-y-auto bg-gray-50">
-        <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100 min-h-full">
-          <header className="mb-10 flex justify-between items-end">
+        <div className="bg-white p-8 rounded-[40px] shadow-sm border border-gray-100 min-h-full">
+          <header className="mb-10 flex justify-between items-center">
             <div>
               <h1 className="text-4xl font-black text-gray-900 tracking-tighter">Mapa de Férias</h1>
-              <p className="text-gray-400 font-medium text-sm italic">Gestão operacional AAF</p>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="w-2 h-2 bg-green-500 rounded-full"></span>
+                <p className="text-gray-400 font-medium text-xs">Ligado ao Supabase Cloud • AAF v2.0</p>
+              </div>
             </div>
             
             <div className="flex gap-4">
-              {/* NOVO BOTÃO PDF */}
               <button 
                 onClick={exportToPDF}
-                className="bg-white border-2 border-gray-900 text-gray-900 px-6 py-4 rounded-2xl font-bold hover:bg-gray-100 transition-all active:scale-95"
+                className="bg-white border-2 border-gray-900 text-gray-900 px-6 py-4 rounded-2xl font-bold hover:bg-gray-900 hover:text-white transition-all active:scale-95"
               >
                 Exportar PDF
               </button>
-              
               <button 
                 onClick={() => setIsVacationModalOpen(true)}
-                className="bg-gray-900 text-white px-8 py-4 rounded-2xl font-bold hover:bg-blue-600 shadow-xl transition-all active:scale-95"
+                className="bg-blue-600 text-white px-8 py-4 rounded-2xl font-bold hover:bg-blue-700 shadow-xl shadow-blue-100 transition-all active:scale-95"
               >
                 Marcar Férias
               </button>
             </div>
           </header>
 
-          <FullCalendar
-            plugins={[dayGridPlugin, interactionPlugin]}
-            initialView="dayGridMonth"
-            locale="pt"
-            events={calendarEvents}
-            height="65vh"
-            eventClick={handleEventClick}
-            eventClassNames="font-bold text-[11px] rounded-lg shadow-sm border-none px-2 cursor-pointer"
-          />
+          <div className="calendar-container border border-gray-100 rounded-3xl p-4 shadow-inner bg-gray-50/30">
+            <FullCalendar
+              plugins={[dayGridPlugin, interactionPlugin]}
+              initialView="dayGridMonth"
+              locale="pt"
+              events={calendarEvents}
+              height="65vh"
+              eventClick={handleEventClick}
+              dayMaxEvents={true}
+              eventClassNames="font-bold text-[11px] rounded-lg shadow-sm border-none px-2 py-1 cursor-pointer transition-transform hover:scale-105"
+            />
+          </div>
         </div>
       </main>
 
