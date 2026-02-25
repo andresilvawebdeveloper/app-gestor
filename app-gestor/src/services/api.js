@@ -6,7 +6,6 @@ export const employeeProvider = {
             .from('employees')
             .select('*')
             .order('name', { ascending: true });
-        
         if (error) throw error;
         return { data };
     },
@@ -17,25 +16,32 @@ export const employeeProvider = {
             .insert([{
                 name: newEmp.name,
                 role: newEmp.role,
-                totaldays: parseInt(newEmp.totaldays), // Sincronizado com a BD
+                totaldays: parseInt(newEmp.totaldays),
                 used: 0,
                 color: newEmp.color
             }])
             .select();
-        
-        if (error) {
-            console.error("Erro detalhado:", error.message);
-            throw error;
-        }
+        if (error) throw error;
+        return { data: data[0] };
+    },
+
+    update: async (id, updatedData) => {
+        const { data, error } = await supabase
+            .from('employees')
+            .update({
+                name: updatedData.name,
+                role: updatedData.role,
+                totaldays: parseInt(updatedData.totaldays),
+                color: updatedData.color
+            })
+            .eq('id', id)
+            .select();
+        if (error) throw error;
         return { data: data[0] };
     },
 
     delete: async (id) => {
-        const { error } = await supabase
-            .from('employees')
-            .delete()
-            .eq('id', id);
-        
+        const { error } = await supabase.from('employees').delete().eq('id', id);
         if (error) throw error;
         return { success: true };
     }
@@ -43,19 +49,13 @@ export const employeeProvider = {
 
 export const vacationProvider = {
     getAll: async () => {
-        const { data, error } = await supabase
-            .from('vacations')
-            .select('*');
+        const { data, error } = await supabase.from('vacations').select('*');
         if (error) throw error;
         return { data };
     },
 
     create: async (vacation) => {
-        const { data, error } = await supabase
-            .from('vacations')
-            .insert([vacation])
-            .select();
-        
+        const { data, error } = await supabase.from('vacations').insert([vacation]).select();
         if (error) throw error;
 
         const { data: emp } = await supabase
@@ -73,12 +73,7 @@ export const vacationProvider = {
     },
 
     delete: async (id) => {
-        const { data: vac } = await supabase
-            .from('vacations')
-            .select('*')
-            .eq('id', id)
-            .single();
-
+        const { data: vac } = await supabase.from('vacations').select('*').eq('id', id).single();
         if (vac) {
             const { data: emp } = await supabase
                 .from('employees')
@@ -91,17 +86,12 @@ export const vacationProvider = {
                 .update({ used: Math.max(0, (emp.used || 0) - vac.work_days) })
                 .eq('id', vac.employee_id);
         }
-
-        const { error } = await supabase
-            .from('vacations')
-            .delete()
-            .eq('id', id);
-
+        const { error } = await supabase.from('vacations').delete().eq('id', id);
         if (error) throw error;
         return { success: true };
     }
 };
-// Adicione isto ao seu api.js atual
+
 export const absenceProvider = {
     getAll: async () => {
         const { data, error } = await supabase.from('absences').select('*');
@@ -116,21 +106,10 @@ export const absenceProvider = {
     delete: async (id) => {
         const { error } = await supabase.from('absences').delete().eq('id', id);
         if (error) throw error;
+        return { success: true };
     }
 };
-// Adicione esta função dentro do objeto employeeProvider no seu api.js
-update: async (id, updatedData) => {
-    const { data, error } = await supabase
-        .from('employees')
-        .update({
-            name: updatedData.name,
-            role: updatedData.role,
-            totaldays: parseInt(updatedData.totaldays),
-            color: updatedData.color
-        })
-        .eq('id', id)
-        .select();
-    
-    if (error) throw error;
-    return { data: data[0] };
-}
+
+// Exportação unificada e limpa para evitar o erro do ESLint
+const api = { employeeProvider, vacationProvider, absenceProvider };
+export default api;
