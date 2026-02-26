@@ -2,6 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { useVacationCalc } from '../hooks/useVacationCalc';
 import { vacationProvider } from '../services/api';
 
+// Lista de Feriados Nacionais Portugal 2026
+const FERIADOS_2026 = [
+  '2026-01-01', '2026-04-03', '2026-04-05', '2026-04-25',
+  '2026-05-01', '2026-06-04', '2026-06-10', '2026-08-15',
+  '2026-10-05', '2026-11-01', '2026-12-01', '2026-12-08', '2026-12-25'
+];
+
 const VacationModal = ({ isOpen, onClose, employees, vacations, onSave }) => {
   const { calculateWorkDays } = useVacationCalc();
   const [formData, setFormData] = useState({ employeeId: '', startDate: '', endDate: '' });
@@ -13,8 +20,17 @@ const VacationModal = ({ isOpen, onClose, employees, vacations, onSave }) => {
       const start = new Date(formData.startDate);
       const end = new Date(formData.endDate);
       
+      // 1. Validar se datas são feriados
+      if (FERIADOS_2026.includes(formData.startDate) || FERIADOS_2026.includes(formData.endDate)) {
+        setError('Não é possível marcar férias em feriados nacionais.');
+        setCalcDays(0);
+        return;
+      }
+
+      // 2. Validar ordem das datas
       if (start > end) {
         setError('A data de início não pode ser depois da data de fim.');
+        setCalcDays(0);
         return;
       }
 
@@ -23,6 +39,7 @@ const VacationModal = ({ isOpen, onClose, employees, vacations, onSave }) => {
 
       const currentEmp = employees.find(e => e.id === parseInt(formData.employeeId));
       
+      // 3. Validar conflitos de equipa (mesma função/cargo)
       const conflict = vacations.some(v => {
         const otherEmp = employees.find(e => e.id === v.employee_id);
         if (otherEmp?.role === currentEmp?.role && otherEmp?.id !== currentEmp?.id) {
@@ -45,33 +62,37 @@ const VacationModal = ({ isOpen, onClose, employees, vacations, onSave }) => {
     e.preventDefault();
     if (error || !formData.employeeId) return;
 
-    // CORREÇÃO PARA O CALENDÁRIO: 
-    // Para o FullCalendar exibir até ao dia 21, o 'end' visual deve ser o dia seguinte.
+    // Ajuste para o FullCalendar (dia de fim exclusivo)
     const visualEndDate = new Date(formData.endDate);
     visualEndDate.setDate(visualEndDate.getDate() + 1);
     const formattedVisualEnd = visualEndDate.toISOString().split('T')[0];
 
-    await vacationProvider.create({
-      employee_id: parseInt(formData.employeeId),
-      employee_name: employees.find(e => e.id === parseInt(formData.employeeId)).name,
-      employee_color: employees.find(e => e.id === parseInt(formData.employeeId)).color,
-      start_date: formData.startDate, // Data real para cálculos
-      end_date: formattedVisualEnd,   // Data ajustada para o calendário ocupar todos os dias
-      display_end_date: formData.endDate, // Guardamos a data real de fim para referência
-      work_days: calcDays
-    });
-    
-    onSave();
-    onClose();
-    setFormData({ employeeId: '', startDate: '', endDate: '' });
+    const selectedEmp = employees.find(e => e.id === parseInt(formData.employeeId));
+
+    try {
+      await vacationProvider.create({
+        employee_id: selectedEmp.id,
+        employee_name: selectedEmp.name,
+        employee_color: selectedEmp.color,
+        start_date: formData.startDate,
+        end_date: formattedVisualEnd,
+        display_end_date: formData.endDate,
+        work_days: calcDays
+      });
+      
+      onSave();
+      onClose();
+      setFormData({ employeeId: '', startDate: '', endDate: '' });
+    } catch (err) {
+      alert("Erro ao gravar no Supabase. Verifique a ligação.");
+    }
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 flex items-center justify-center p-4">
-      {/* Design de Alto Contraste: Sombra profunda e bordas nítidas */}
-      <div className="bg-white w-full max-w-md rounded-[32px] p-10 shadow-[0_25px_70px_-15px_rgba(0,0,0,0.6)] border border-gray-200 relative">
+    <div className="fixed inset-0 flex items-center justify-center p-4 z-[10000] bg-black/40">
+      <div className="bg-white w-full max-w-md rounded-[32px] p-10 shadow-2xl border border-gray-200 relative">
         
         <div className="flex justify-between items-center mb-8">
           <h2 className="text-2xl font-black text-gray-900 tracking-tight">Marcar Férias</h2>
@@ -132,12 +153,12 @@ const VacationModal = ({ isOpen, onClose, employees, vacations, onSave }) => {
           )}
           
           <div className="flex gap-4 pt-4">
-            <button type="button" onClick={onClose} className="flex-1 px-6 py-4 text-gray-400 font-bold hover:text-gray-600 transition-all">Cancelar</button>
+            <button type="button" onClick={onClose} className="flex-1 px-6 py-4 text-gray-400 font-bold">Cancelar</button>
             <button 
               type="submit" 
               disabled={!!error || !formData.employeeId} 
-              className={`flex-[2] px-6 py-4 rounded-2xl font-bold text-white shadow-lg transition-all active:scale-95 ${
-                error || !formData.employeeId ? 'bg-gray-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 shadow-blue-200'
+              className={`flex-[2] px-6 py-4 rounded-2xl font-bold text-white shadow-lg transition-all ${
+                error || !formData.employeeId ? 'bg-gray-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
               }`}
             >
               Confirmar Férias

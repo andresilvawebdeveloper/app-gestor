@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import interactionPlugin from '@fullcalendar/interaction';
-import { employeeProvider, vacationProvider, absenceProvider } from '../services/api'; // Adicionado absenceProvider
+import { employeeProvider, vacationProvider, absenceProvider } from '../services/api';
 import jsPDF from 'jspdf';
 import html2canvas from 'html2canvas';
 
@@ -10,23 +10,29 @@ import VacationModal from '../components/VacationModal';
 import AddEmployeeModal from '../components/AddEmployeeModal';
 import LogoEmpresa from '../assets/logoAAF.jpg'; 
 
+// 1. Definição Global dos Feriados
+const FERIADOS_2026 = [
+  '2026-01-01', '2026-04-03', '2026-04-05', '2026-04-25',
+  '2026-05-01', '2026-06-04', '2026-06-10', '2026-08-15',
+  '2026-10-05', '2026-11-01', '2026-12-01', '2026-12-08', '2026-12-25'
+];
+
 const Dashboard = () => {
   const [employees, setEmployees] = useState([]);
   const [vacations, setVacations] = useState([]);
-  const [absences, setAbsences] = useState([]); // Novo estado para faltas
+  const [absences, setAbsences] = useState([]);
   const [loading, setLoading] = useState(true);
   const dashboardRef = useRef();
   
   const [isVacationModalOpen, setIsVacationModalOpen] = useState(false);
   const [isAddEmpModalOpen, setIsAddEmpModalOpen] = useState(false);
 
-  // Carregar dados da Base de Dados (Supabase)
   const fetchData = async () => {
     try {
       const [empRes, vacRes, absRes] = await Promise.all([
         employeeProvider.getAll(),
         vacationProvider.getAll(),
-        absenceProvider.getAll() // Carrega as faltas
+        absenceProvider.getAll()
       ]);
       setEmployees(empRes.data || []);
       setVacations(vacRes.data || []);
@@ -42,12 +48,17 @@ const Dashboard = () => {
     fetchData();
   }, []);
 
-  // Função para registar falta rapidamente
   const handleAddAbsence = async (emp) => {
     const dataFalta = prompt(`Data da falta para ${emp.name} (AAAA-MM-DD):`, new Date().toISOString().split('T')[0]);
     if (!dataFalta) return;
 
+    if (FERIADOS_2026.includes(dataFalta)) {
+      alert(`Impossível registar falta: O dia ${dataFalta} é feriado nacional!`);
+      return;
+    }
+
     const motivo = prompt("Motivo da falta (ex: Aviso Prévio, Doença, Sem Aviso):", "Aviso Prévio");
+    if (!motivo) return;
     
     try {
       await absenceProvider.create({
@@ -56,13 +67,12 @@ const Dashboard = () => {
         absence_date: dataFalta,
         reason: motivo
       });
-      fetchData(); // Atualiza a contagem na sidebar
+      fetchData();
     } catch (error) {
       alert("Erro ao registar falta.");
     }
   };
 
-  // Exportar para PDF
   const exportToPDF = async () => {
     const element = dashboardRef.current;
     const canvas = await html2canvas(element, { scale: 2, useCORS: true });
@@ -73,6 +83,8 @@ const Dashboard = () => {
   };
 
   const handleEventClick = async (clickInfo) => {
+    if (clickInfo.event.title === 'FERIADO') return; // Bloqueia clique em feriados
+
     if (window.confirm(`Deseja cancelar as férias de: ${clickInfo.event.title}?`)) {
       try {
         await vacationProvider.delete(parseInt(clickInfo.event.id));
@@ -84,34 +96,39 @@ const Dashboard = () => {
   };
 
   const activeAlerts = () => {
-    const alerts = [];
     const today = new Date().toISOString().split('T')[0];
-    
-    vacations.forEach(v => {
-      if (v.start_date >= today) {
-        const emp = employees.find(e => e.id === v.employee_id);
-        if (emp) alerts.push({ date: v.start_date, role: emp.role, name: emp.name });
-      }
-    });
-    return alerts.sort((a, b) => a.date.localeCompare(b.date)).slice(0, 5);
+    return vacations
+      .filter(v => v.start_date >= today)
+      .map(v => ({ ...v, role: employees.find(e => e.id === v.employee_id)?.role }))
+      .sort((a, b) => a.start_date.localeCompare(b.start_date))
+      .slice(0, 5);
   };
 
-  const calendarEvents = vacations.map(v => ({
-    id: v.id,
-    title: v.employee_name,
-    start: v.start_date,
-    end: v.end_date,
-    backgroundColor: v.employee_color,
-    borderColor: v.employee_color,
-    allDay: true
-  }));
+  // 2. Unificação de Eventos (Férias + Feriados)
+  const calendarEvents = [
+    // Férias dos colaboradores
+    ...vacations.map(v => ({
+      id: v.id.toString(),
+      title: v.employee_name,
+      start: v.start_date,
+      end: v.end_date,
+      backgroundColor: v.employee_color,
+      borderColor: v.employee_color,
+      allDay: true
+    })),
+    // Bloqueio visual de Feriados
+    ...FERIADOS_2026.map(data => ({
+      title: 'FERIADO',
+      start: data,
+      allDay: true,
+      display: 'background',
+      backgroundColor: '#ffcccc' 
+    }))
+  ];
 
   if (loading) return (
-    <div className="h-screen flex items-center justify-center bg-gray-50">
-      <div className="flex flex-col items-center gap-4">
-        <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-        <p className="font-black text-blue-600 uppercase tracking-widest text-sm">A ligar à Nuvem AAF...</p>
-      </div>
+    <div className="h-screen flex items-center justify-center bg-gray-50 font-black text-blue-600 uppercase tracking-widest text-sm">
+      A ligar à Nuvem AAF...
     </div>
   );
 
@@ -157,10 +174,7 @@ const Dashboard = () => {
                   <p className="text-[9px] text-blue-600 font-black uppercase ml-5 mb-3 tracking-widest">{emp.role}</p>
                   
                   <div className="w-[calc(100%-20px)] bg-gray-200 rounded-full h-2 ml-5 overflow-hidden">
-                    <div 
-                      className="h-2 transition-all duration-700 ease-out" 
-                      style={{ width: `${percentagem}%`, backgroundColor: emp.color }}
-                    ></div>
+                    <div className="h-2 transition-all duration-700 ease-out" style={{ width: `${percentagem}%`, backgroundColor: emp.color }}></div>
                   </div>
 
                   <div className="flex justify-between items-end ml-5 mt-3">
@@ -173,16 +187,13 @@ const Dashboard = () => {
                     </div>
                   </div>
 
-                  {/* SECÇÃO DE FALTAS */}
                   <div className="mt-4 pt-3 border-t border-dashed border-gray-200 flex justify-between items-center ml-5">
-                    <div className="flex flex-col">
-                      <span className={`text-[10px] font-black uppercase ${numFaltas > 3 ? 'text-red-600' : 'text-orange-600'}`}>
-                         {numFaltas} Faltas
-                      </span>
-                    </div>
+                    <span className={`text-[10px] font-black uppercase ${numFaltas > 3 ? 'text-red-600' : 'text-orange-600'}`}>
+                       {numFaltas} Faltas
+                    </span>
                     <button 
                       onClick={() => handleAddAbsence(emp)} 
-                      className="text-[8px] bg-orange-100 text-orange-600 px-2 py-1 rounded-md font-black hover:bg-orange-600 hover:text-white transition-all"
+                      className="text-[8px] bg-orange-100 text-orange-600 px-2 py-1 rounded-md font-black hover:bg-orange-600 hover:text-white"
                     >
                       + REGISTAR
                     </button>
@@ -190,20 +201,6 @@ const Dashboard = () => {
                 </div>
               );
             })}
-          </div>
-
-          <div className="mt-10 pt-6 border-t border-gray-100">
-            <h3 className="text-[10px] font-black text-red-500 uppercase tracking-widest mb-4 flex items-center gap-2">
-                <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></span> Próximas Saídas
-            </h3>
-            <div className="space-y-2">
-              {activeAlerts().length > 0 ? activeAlerts().map((alert, idx) => (
-                <div key={idx} className="flex justify-between items-center bg-red-50 p-3 rounded-xl border border-red-100">
-                  <span className="text-[9px] font-bold text-gray-700">{new Date(alert.date).toLocaleDateString('pt-PT')}</span>
-                  <span className="text-[8px] bg-red-600 text-white px-2 py-0.5 rounded font-black uppercase">{alert.role}</span>
-                </div>
-              )) : <p className="text-[10px] text-gray-400 italic">Sem saídas programadas.</p>}
-            </div>
           </div>
         </div>
       </aside>
@@ -213,15 +210,12 @@ const Dashboard = () => {
           <header className="mb-10 flex justify-between items-center">
             <div>
               <h1 className="text-4xl font-black text-gray-900 tracking-tighter">Mapa de Férias</h1>
-              <div className="flex items-center gap-2 mt-1">
-                <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-                <p className="text-gray-400 font-medium text-xs">Ligado ao Supabase Cloud • AAF v2.1</p>
-              </div>
+              <p className="text-gray-400 font-medium text-xs mt-1">Ligado ao Supabase Cloud • AAF v2.1</p>
             </div>
             
             <div className="flex gap-4">
-              <button onClick={exportToPDF} className="bg-white border-2 border-gray-900 text-gray-900 px-6 py-4 rounded-2xl font-bold hover:bg-gray-900 hover:text-white transition-all active:scale-95">Exportar PDF</button>
-              <button onClick={() => setIsVacationModalOpen(true)} className="bg-blue-600 text-white px-8 py-4 rounded-2xl font-bold hover:bg-blue-700 shadow-xl shadow-blue-100 transition-all active:scale-95">Marcar Férias</button>
+              <button onClick={exportToPDF} className="bg-white border-2 border-gray-900 text-gray-900 px-6 py-4 rounded-2xl font-bold hover:bg-gray-900 hover:text-white active:scale-95 transition-all">Exportar PDF</button>
+              <button onClick={() => setIsVacationModalOpen(true)} className="bg-blue-600 text-white px-8 py-4 rounded-2xl font-bold hover:bg-blue-700 shadow-xl shadow-blue-100 active:scale-95 transition-all">Marcar Férias</button>
             </div>
           </header>
 
@@ -234,7 +228,7 @@ const Dashboard = () => {
               height="65vh"
               eventClick={handleEventClick}
               dayMaxEvents={true}
-              eventClassNames="font-bold text-[11px] rounded-lg shadow-sm border-none px-2 py-1 cursor-pointer transition-transform hover:scale-105"
+              eventClassNames="font-bold text-[11px] rounded-lg border-none px-2 py-1 cursor-pointer"
             />
           </div>
         </div>
